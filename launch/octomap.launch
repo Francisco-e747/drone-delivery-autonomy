@@ -1,0 +1,10 @@
+<launch>
+  <node pkg="drone_delivery" type="depth_to_cloud.py" name="depth_to_cloud" output="screen"/>
+
+  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen">
+    <param name="resolution" value="0.5"/>
+    <param name="frame_id" value="front_center_custom_optical"/>
+    <param name="sensor_model/max_range" value="100.0"/>
+    <remap from="cloud_in" to="/depth_cloud"/>
+  </node>
+</launch>

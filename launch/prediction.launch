@@ -1,0 +1,5 @@
+<launch>
+  <node pkg="drone_delivery" type="tracker_node.py" name="tracker_node" output="screen"/>
+  <node pkg="drone_delivery" type="predictor_node.py" name="predictor_node" output="screen"/>
+  <node pkg="drone_delivery" type="threat_classifier_node.py" name="threat_classifier_node" output="screen"/>
+</launch>

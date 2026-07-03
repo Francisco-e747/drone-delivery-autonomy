@@ -1,0 +1,11 @@
+<launch>
+  <node pkg="drone_delivery" type="detection_node.py" name="detection_node" output="screen">
+    <param name="model_path" value="/home/javier/catkin_ws/src/drone_delivery/weights/visdrone_yolov8n_best.pt"/>
+    <param name="camera_topic" value="/airsim_node/drone_1/front_center_custom/Scene"/>
+    <param name="confidence" value="0.25"/>
+  </node>
+
+  <node pkg="drone_delivery" type="depth_fusion_node.py" name="depth_fusion_node" output="screen"/>
+
+  <node pkg="drone_delivery" type="tracker_node.py" name="tracker_node" output="screen"/>
+</launch>

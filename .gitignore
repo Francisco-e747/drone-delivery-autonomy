@@ -1,0 +1,23 @@
+# Large files
+weights/
+data/
+bags/
+runs/
+*.bag
+*.pt
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build
+build/
+devel/
+install/
+*.egg-info/
+
+# Logs
+*.log
+log/

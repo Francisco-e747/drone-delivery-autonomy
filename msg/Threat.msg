@@ -1,0 +1,7 @@
+std_msgs/Header header
+int32 track_id
+geometry_msgs/Point position
+geometry_msgs/Point predicted_position
+geometry_msgs/Vector3 velocity
+float32 uncertainty_radius
+string classification

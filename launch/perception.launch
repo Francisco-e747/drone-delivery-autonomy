@@ -1,0 +1,11 @@
+<launch>
+  <arg name="model_path" default="/home/javier/catkin_ws/src/drone_delivery/weights/visdrone_yolov8n_best.pt"/>
+  <arg name="camera_topic" default="/airsim_node/drone_1/front_center_custom/Scene"/>
+  <arg name="confidence" default="0.25"/>
+
+  <node pkg="drone_delivery" type="detection_node.py" name="detection_node" output="screen">
+    <param name="model_path"    value="$(arg model_path)"/>
+    <param name="camera_topic"  value="$(arg camera_topic)"/>
+    <param name="confidence"    value="$(arg confidence)"/>
+  </node>
+</launch>
