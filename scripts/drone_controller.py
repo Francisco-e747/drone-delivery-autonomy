@@ -98,8 +98,8 @@ class DroneController:
             if f < self.SAFE_DIST:
                 self.avoidance_active = True
                 self.avoidance_vx = -1.0 if f < self.STOP_DIST else 0.0
-                self.avoidance_vy = -2.0 if l > r else 2.0
-                self.avoidance_vz = 1.0
+                self.avoidance_vy = -3.0 if l > r else 3.0
+                self.avoidance_vz = 2.0
                 rospy.logwarn_throttle(1, f'Obstacle: front={f:.1f}m L={l:.1f}m R={r:.1f}m')
             else:
                 self.avoidance_active = False
