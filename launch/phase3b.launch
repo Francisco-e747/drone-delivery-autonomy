@@ -1,0 +1,6 @@
+<launch>
+  <node pkg="drone_delivery" type="drone_controller.py"
+        name="drone_controller" output="screen"/>
+  <node pkg="drone_delivery" type="failsafe_node.py"
+        name="failsafe_node" output="screen"/>
+</launch>

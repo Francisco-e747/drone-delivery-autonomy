@@ -33,16 +33,14 @@ class OffboardHeartbeat:
         self.att_pub.publish(msg)
 
     def run(self):
-        # Step 1: publish for 10 seconds
         rospy.loginfo("Publishing attitude setpoints for 10 seconds...")
         t0 = time.time()
         while time.time() - t0 < 10.0:
             self.publish_attitude()
             self.rate.sleep()
 
-        # Step 2: switch to OFFBOARD with retries
         rospy.loginfo("Switching to OFFBOARD mode...")
-        for attempt in range(30):
+        for attempt in range(20):
             self.publish_attitude()
             resp = self.set_mode_client(custom_mode="OFFBOARD")
             if resp.mode_sent:
@@ -51,25 +49,16 @@ class OffboardHeartbeat:
             rospy.logwarn(f"OFFBOARD attempt {attempt+1} failed")
             time.sleep(0.3)
 
-        # Step 3: wait for confirmation
-        t0 = time.time()
-        while time.time() - t0 < 5.0:
-            self.publish_attitude()
-            if self.current_state.mode == "OFFBOARD":
-                break
-            self.rate.sleep()
-
-        # Step 4: arm
         rospy.loginfo("Arming...")
         for attempt in range(20):
             self.publish_attitude()
             resp = self.arming_client(True)
             if resp.success:
+                rospy.loginfo("Armed!")
                 break
             rospy.logwarn(f"Arm attempt {attempt+1} failed")
             time.sleep(0.3)
 
-        # Step 5: maintain for 60 seconds
         rospy.loginfo("Maintaining OFFBOARD for 60 seconds...")
         start = rospy.Time.now()
         drops = 0
