@@ -1,0 +1,14 @@
+<launch>
+  <!-- 1. Perception first -->
+  <include file="$(find drone_delivery)/launch/perception.launch"/>
+
+  <!-- 2. Flight controller + collision avoidance -->
+  <node pkg="drone_delivery" type="drone_controller.py"
+        name="drone_controller" output="screen"/>
+  <node pkg="drone_delivery" type="failsafe_node.py"
+        name="failsafe_node" output="screen"/>
+
+  <!-- 3. Mission planner -->
+  <node pkg="drone_delivery" type="mission_manager.py"
+        name="mission_manager" output="screen"/>
+</launch>
