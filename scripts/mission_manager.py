@@ -182,6 +182,12 @@ class MissionManager:
             dist_m = math.sqrt((dlat*111320)**2 + (dlon*111320*math.cos(math.radians(self.current_gps.latitude)))**2)
             rospy.loginfo_throttle(3, f'Distance to goal: {dist_m:.0f}m')
             self.status_pub.publish(String(data=f'DISTANCE:{dist_m:.0f}m'))
+            # continuously update goal_local so drone steers correctly
+            from geometry_msgs.msg import Point
+            gp = Point()
+            gp.x = dlon * math.cos(math.radians(self.current_gps.latitude)) * 111320
+            gp.y = dlat * 111320
+            self.goal_local_pub.publish(gp)
             if dist_m < 100.0:  # within 100m of goal
                 rospy.loginfo('MISSION COMPLETE - sending land command')
                 self.land_pub.publish(Bool(data=True))
