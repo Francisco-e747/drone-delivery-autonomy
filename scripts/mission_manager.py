@@ -50,6 +50,9 @@ class MissionManager:
                         self.takeoff_cb, queue_size=1)
 
         # Publishers
+        self.waypoints_pub = rospy.Publisher('/mission/gps_waypoints',
+                                            __import__('std_msgs.msg', fromlist=['String']).String,
+                                            queue_size=1, latch=True)
         self.goal_local_pub = rospy.Publisher('/mission/goal_local',
                                             __import__('geometry_msgs.msg', fromlist=['Point']).Point,
                                             queue_size=1, latch=True)
@@ -155,6 +158,7 @@ class MissionManager:
             self.status_pub.publish(String(data='PLAN_FAILED'))
 
     def publish_path(self, path):
+        # publish as local path
         ros_path = Path()
         ros_path.header.frame_id = 'map'
         ros_path.header.stamp = rospy.Time.now()
@@ -163,11 +167,22 @@ class MissionManager:
             pose.header = ros_path.header
             pose.pose.position.x = x
             pose.pose.position.y = y
-            pose.pose.position.z = 20.0  # cruise altitude
+            pose.pose.position.z = 20.0
             pose.pose.orientation.w = 1.0
             ros_path.poses.append(pose)
         self.path_pub.publish(ros_path)
-        rospy.loginfo(f'Path published with {len(path)} waypoints')
+
+        # also publish GPS waypoints for drone_controller
+        from sensor_msgs.msg import NavSatFix
+        import json
+        gps_waypoints = []
+        for x, y in path:
+            lat, lon = self.local_to_gps(x, y)
+            gps_waypoints.append({'lat': lat, 'lon': lon})
+        from std_msgs.msg import String
+        self.waypoints_pub.publish(String(data=json.dumps(gps_waypoints)))
+        rospy.loginfo(f'GPS waypoints published: {len(gps_waypoints)}')
+        rospy.loginfo(f'Path published: {len(path)} waypoints')
 
     def check_waypoint_progress(self):
         if not self.mission_active or not self.waypoints:
@@ -188,7 +203,7 @@ class MissionManager:
             gp.x = dlon * math.cos(math.radians(self.current_gps.latitude)) * 111320
             gp.y = dlat * 111320
             self.goal_local_pub.publish(gp)
-            if dist_m < 100.0:  # within 100m of goal
+            if dist_m < 50.0:  # within 100m of goal
                 rospy.loginfo('MISSION COMPLETE - sending land command')
                 self.land_pub.publish(Bool(data=True))
                 self.status_pub.publish(String(data='MISSION_COMPLETE'))

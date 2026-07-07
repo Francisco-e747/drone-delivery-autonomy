@@ -3,7 +3,10 @@ import rospy, time, math
 from mavros_msgs.msg import AttitudeTarget, State
 from mavros_msgs.srv import CommandBool, SetMode
 from sensor_msgs.msg import Image
+from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
+from geometry_msgs.msg import Point
+from std_msgs.msg import Bool
 
 class DroneController:
     def __init__(self):
@@ -12,9 +15,6 @@ class DroneController:
         self.rate = rospy.Rate(20)
         self.mavros_state = State()
         self.phase = 'INIT'
-        self.thrust = 0.55  # hover thrust
-        self.roll = 0.0
-        self.pitch = 0.0
         self.SAFE_DIST = 8.0
         self.STOP_DIST = 4.0
         self.obstacle_detected = False
@@ -22,25 +22,24 @@ class DroneController:
         self.avoid_roll = 0.0
         self.goal_bearing = None
         self.should_land = False
+        self._dist_to_goal = 500
 
         self.att_pub = rospy.Publisher('/mavros/setpoint_raw/attitude',
                                       AttitudeTarget, queue_size=10)
-        rospy.Subscriber('/mavros/state', State, self.state_cb, queue_size=1)
-        rospy.Subscriber('/mission/goal_local',
-                        __import__('geometry_msgs.msg', fromlist=['Point']).Point,
-                        self.goal_local_cb, queue_size=1)
-        rospy.Subscriber('/mission/land',
-                        __import__('std_msgs.msg', fromlist=['Bool']).Bool,
-                        self.land_cb, queue_size=1)
         self.takeoff_pub = rospy.Publisher('/mission/takeoff_complete',
-                        __import__('std_msgs.msg', fromlist=['Bool']).Bool,
-                        queue_size=1)
-        rospy.Subscriber('/mavros/global_position/global',
-                        __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
-                        self.gps_cb, queue_size=1)
-        self.gps_pos = None
+                                          Bool, queue_size=1)
+
+        rospy.Subscriber('/mavros/state', State, self.state_cb, queue_size=1)
         rospy.Subscriber('/airsim_node/drone_1/front_center_custom/DepthPerspective',
                         Image, self.depth_cb, queue_size=1)
+        rospy.Subscriber('/mission/goal_local', Point, self.goal_local_cb, queue_size=1)
+        rospy.Subscriber('/mission/land', Bool, self.land_cb, queue_size=1)
+        rospy.Subscriber('/mavros/global_position/raw/fix',
+                        __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
+                        self.fix_cb, queue_size=1)
+        self.current_altitude = 0.0
+        self.target_altitude = 220.0
+
         rospy.wait_for_service('/mavros/cmd/arming')
         rospy.wait_for_service('/mavros/set_mode')
         self.arming_client = rospy.ServiceProxy('/mavros/cmd/arming', CommandBool)
@@ -50,11 +49,21 @@ class DroneController:
     def state_cb(self, msg):
         self.mavros_state = msg
 
-    def gps_cb(self, msg):
-        self.gps_pos = msg
-        if not hasattr(self, '_gps_logged'):
-            rospy.loginfo(f'GPS: lat={msg.latitude:.6f} lon={msg.longitude:.6f} alt={msg.altitude:.1f}')
-            self._gps_logged = True
+    def goal_local_cb(self, msg):
+        bearing = math.atan2(msg.x, msg.y)
+        if self.goal_bearing is None:
+            self.goal_bearing = bearing
+        else:
+            self.goal_bearing = 0.95 * self.goal_bearing + 0.05 * bearing
+        self._dist_to_goal = msg.z if msg.z > 0 else 500
+
+    def land_cb(self, msg):
+        if msg.data:
+            self.should_land = True
+            rospy.loginfo('Land command received')
+
+    def fix_cb(self, msg):
+        self.current_altitude = msg.altitude
 
     def depth_cb(self, msg):
         if self.phase not in ['TAKEOFF', 'NAVIGATE']:
@@ -76,32 +85,43 @@ class DroneController:
             r = zone_min(right)
             u = zone_min(upper)
 
+            if self.phase == 'TAKEOFF' and self.current_alt() < 10.0:
+                self.obstacle_detected = False
+                return
+
             if f < self.SAFE_DIST:
                 self.obstacle_detected = True
-                # go up if clear above, otherwise roll away
                 if u > 5.0:
-                    self.avoid_thrust = 0.75  # climb
+                    self.avoid_thrust = 0.75
                     self.avoid_roll = 0.0
                 elif l > r:
                     self.avoid_thrust = 0.58
-                    self.avoid_roll = -0.15  # roll left
+                    self.avoid_roll = -0.15
                 else:
                     self.avoid_thrust = 0.58
-                    self.avoid_roll = 0.15   # roll right
+                    self.avoid_roll = 0.15
                 rospy.logwarn_throttle(1, f'Obstacle: F={f:.1f}m L={l:.1f}m R={r:.1f}m U={u:.1f}m')
             else:
                 self.obstacle_detected = False
-                self.avoid_thrust = 0.55
+                self.avoid_thrust = 0.528
                 self.avoid_roll = 0.0
         except:
             pass
 
-    def publish_attitude(self, thrust=0.55, roll=0.0, pitch=0.0):
-        from geometry_msgs.msg import Quaternion
+    def current_alt(self):
+        try:
+            fix = rospy.wait_for_message('/mavros/global_position/raw/fix',
+                                        __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
+                                        timeout=0.1)
+            return fix.altitude - 100.0  # approx above ground
+        except:
+            return 0.0
+
+    def publish_attitude(self, thrust=0.528, roll=0.0, pitch=0.0):
         import tf.transformations as tft
         msg = AttitudeTarget()
         msg.header.stamp = rospy.Time.now()
-        msg.type_mask = 0b00000111  # ignore body rates
+        msg.type_mask = 0b00000111
         q = tft.quaternion_from_euler(roll, pitch, 0.0)
         msg.orientation.x = q[0]
         msg.orientation.y = q[1]
@@ -109,19 +129,6 @@ class DroneController:
         msg.orientation.w = q[3]
         msg.thrust = thrust
         self.att_pub.publish(msg)
-
-    def goal_local_cb(self, msg):
-        import math
-        bearing = math.atan2(msg.x, msg.y)
-        if self.goal_bearing is None:
-            self.goal_bearing = bearing
-        else:
-            self.goal_bearing = 0.95 * self.goal_bearing + 0.05 * bearing
-
-    def land_cb(self, msg):
-        if msg.data:
-            rospy.loginfo('Land command - AUTO.LAND')
-            self.should_land = True
 
     def run(self):
         # INIT
@@ -139,7 +146,7 @@ class DroneController:
             self.publish_attitude()
             self.set_mode_client(custom_mode='OFFBOARD')
             self.rate.sleep()
-        for _ in range(20):
+        for _ in range(30):
             self.publish_attitude()
             resp = self.arming_client(True)
             if resp.success:
@@ -147,23 +154,33 @@ class DroneController:
                 break
             self.rate.sleep()
 
-        # TAKEOFF - 25 seconds
+        # TAKEOFF
         rospy.loginfo('PHASE: TAKEOFF')
         self.phase = 'TAKEOFF'
         t0 = time.time()
         while time.time() - t0 < 25.0 and not rospy.is_shutdown():
             if self.mavros_state.mode != 'OFFBOARD':
                 self.set_mode_client(custom_mode='OFFBOARD')
-            self.publish_attitude(thrust=0.6)
+            self.publish_attitude(thrust=0.60)  # high thrust to climb fast past buildings
             self.rate.sleep()
 
         # NAVIGATE
         rospy.loginfo('PHASE: NAVIGATE')
         self.phase = 'NAVIGATE'
-        from std_msgs.msg import Bool
         self.takeoff_pub.publish(Bool(data=True))
         while not rospy.is_shutdown():
             if self.should_land:
+                rospy.loginfo('Landing - hovering then descending...')
+                # hover in place for 3 seconds first
+                for i in range(60):
+                    self.publish_attitude(thrust=0.528, roll=0.0)
+                    self.rate.sleep()
+                # gradual descent
+                rospy.loginfo('Descending...')
+                for i in range(300):
+                    thrust = max(0.38, 0.525 - i*0.0005)
+                    self.publish_attitude(thrust=thrust, roll=0.0)
+                    self.rate.sleep()
                 self.set_mode_client(custom_mode='AUTO.LAND')
                 return
             if self.mavros_state.mode != 'OFFBOARD':
@@ -171,11 +188,14 @@ class DroneController:
             if self.obstacle_detected:
                 self.publish_attitude(thrust=self.avoid_thrust, roll=self.avoid_roll)
             elif self.goal_bearing is not None:
-                import math
                 roll = max(-0.08, min(0.08, -self.goal_bearing * 0.15))
-                self.publish_attitude(thrust=0.528, roll=roll)
+                alt_error = self.target_altitude - self.current_altitude
+                thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
+                self.publish_attitude(thrust=thrust, roll=roll)
             else:
-                self.publish_attitude(thrust=0.528)
+                alt_error = self.target_altitude - self.current_altitude
+                thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
+                self.publish_attitude(thrust=thrust)
             self.rate.sleep()
 
 if __name__ == '__main__':
