@@ -24,6 +24,10 @@ class DroneController:
         self.att_pub = rospy.Publisher('/mavros/setpoint_raw/attitude',
                                       AttitudeTarget, queue_size=10)
         rospy.Subscriber('/mavros/state', State, self.state_cb, queue_size=1)
+        rospy.Subscriber('/mavros/global_position/global',
+                        __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
+                        self.gps_cb, queue_size=1)
+        self.gps_pos = None
         rospy.Subscriber('/airsim_node/drone_1/front_center_custom/DepthPerspective',
                         Image, self.depth_cb, queue_size=1)
         rospy.wait_for_service('/mavros/cmd/arming')
@@ -34,6 +38,12 @@ class DroneController:
 
     def state_cb(self, msg):
         self.mavros_state = msg
+
+    def gps_cb(self, msg):
+        self.gps_pos = msg
+        if not hasattr(self, '_gps_logged'):
+            rospy.loginfo(f'GPS: lat={msg.latitude:.6f} lon={msg.longitude:.6f} alt={msg.altitude:.1f}')
+            self._gps_logged = True
 
     def depth_cb(self, msg):
         if self.phase not in ['TAKEOFF', 'NAVIGATE']:
