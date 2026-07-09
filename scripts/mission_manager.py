@@ -220,7 +220,7 @@ class MissionManager:
             gp.x = dlon * math.cos(math.radians(self.current_gps.latitude)) * 111320
             gp.y = dlat * 111320
             self.goal_local_pub.publish(gp)
-            if dist_m < 50.0:  # within 100m of goal
+            if dist_m < 5.0:  # within 5m of goal
                 rospy.loginfo('MISSION COMPLETE - sending land command')
                 self.land_pub.publish(Bool(data=True))
                 self.status_pub.publish(String(data='MISSION_COMPLETE'))
