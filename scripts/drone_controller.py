@@ -30,6 +30,11 @@ class DroneController:
                                           Bool, queue_size=1)
 
         rospy.Subscriber('/mavros/state', State, self.state_cb, queue_size=1)
+        rospy.Subscriber('/mission/hover',
+                        __import__('std_msgs.msg', fromlist=['Bool']).Bool,
+                        self.hover_cb, queue_size=1)
+        self._hovering = False
+        self._hover_count = 0
         rospy.Subscriber('/airsim_node/drone_1/front_center_custom/DepthPerspective',
                         Image, self.depth_cb, queue_size=1)
         rospy.Subscriber('/mission/goal_local', Point, self.goal_local_cb, queue_size=1)
@@ -38,7 +43,7 @@ class DroneController:
                         __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
                         self.fix_cb, queue_size=1)
         self.current_altitude = 0.0
-        self.target_altitude = 220.0
+        self.target_altitude = 290.0
 
         rospy.wait_for_service('/mavros/cmd/arming')
         rospy.wait_for_service('/mavros/set_mode')
@@ -48,6 +53,12 @@ class DroneController:
 
     def state_cb(self, msg):
         self.mavros_state = msg
+
+    def hover_cb(self, msg):
+        if msg.data:
+            self._hovering = True
+            self._hover_count = 0
+            rospy.loginfo('Hovering to recalibrate...')
 
     def goal_local_cb(self, msg):
         bearing = math.atan2(msg.x, msg.y)
@@ -188,10 +199,25 @@ class DroneController:
             if self.obstacle_detected:
                 self.publish_attitude(thrust=self.avoid_thrust, roll=self.avoid_roll)
             elif self.goal_bearing is not None:
-                roll = max(-0.08, min(0.08, -self.goal_bearing * 0.15))
-                alt_error = self.target_altitude - self.current_altitude
-                thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
-                self.publish_attitude(thrust=thrust, roll=roll)
+                if self._hovering:
+                    self._hover_count += 1
+                    alt_error = self.target_altitude - self.current_altitude
+                    thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
+                    self.publish_attitude(thrust=thrust, roll=0.0)
+                    if self._hover_count > 100:  # hover 5 seconds then resume
+                        self._hovering = False
+                        rospy.loginfo('Resuming navigation...')
+                else:
+                    dist = getattr(self, '_dist_to_goal', 999)
+                    if dist < 50:
+                        alt_error = self.target_altitude - self.current_altitude
+                        thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
+                        self.publish_attitude(thrust=thrust, roll=0.0)
+                    else:
+                        roll = max(-0.08, min(0.08, -self.goal_bearing * 0.15))
+                        alt_error = self.target_altitude - self.current_altitude
+                        thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
+                        self.publish_attitude(thrust=thrust, roll=roll)
             else:
                 alt_error = self.target_altitude - self.current_altitude
                 thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))

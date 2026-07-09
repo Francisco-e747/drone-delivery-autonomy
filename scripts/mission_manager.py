@@ -189,6 +189,11 @@ class MissionManager:
             return
         if self.current_gps is None:
             return
+        # stall detection
+        if not hasattr(self, '_last_distances'):
+            self._last_distances = []
+            self._stall_hover_pub = rospy.Publisher('/mission/hover',
+                __import__('std_msgs.msg', fromlist=['Bool']).Bool, queue_size=1)
 
         # check distance to final goal using GPS
         if self.goal_gps is not None:
@@ -197,6 +202,18 @@ class MissionManager:
             dist_m = math.sqrt((dlat*111320)**2 + (dlon*111320*math.cos(math.radians(self.current_gps.latitude)))**2)
             rospy.loginfo_throttle(3, f'Distance to goal: {dist_m:.0f}m')
             self.status_pub.publish(String(data=f'DISTANCE:{dist_m:.0f}m'))
+            # overshoot detection - when distance increases after decreasing
+            if not hasattr(self, '_min_dist'):
+                self._min_dist = dist_m
+                self._overshot = False
+            if dist_m < self._min_dist:
+                self._min_dist = dist_m
+                self._overshot = False
+            elif dist_m > self._min_dist + 3 and not self._overshot:
+                self._overshot = True
+                rospy.logwarn(f'Overshoot at {dist_m:.0f}m (min was {self._min_dist:.0f}m) - hovering!')
+                self._stall_hover_pub.publish(__import__('std_msgs.msg', fromlist=['Bool']).Bool(data=True))
+                self._min_dist = dist_m  # reset
             # continuously update goal_local so drone steers correctly
             from geometry_msgs.msg import Point
             gp = Point()
