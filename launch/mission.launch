@@ -11,4 +11,7 @@
   <!-- 3. Mission planner -->
   <node pkg="drone_delivery" type="mission_manager.py"
         name="mission_manager" output="screen"/>
+  <!-- Vision pose for EKF2 xy_valid -->
+  <node pkg="drone_delivery" type="vision_pose_publisher.py"
+        name="vision_pose_publisher" output="screen"/>
 </launch>
