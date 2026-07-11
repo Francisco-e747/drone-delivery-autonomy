@@ -48,7 +48,7 @@ class VisionPosePublisher:
         dlon = lon - self.origin_gps.longitude
         x = dlon * math.cos(math.radians(self.origin_gps.latitude)) * 111320
         y = dlat * 111320
-        z = alt - self.origin_gps.altitude
+        z = alt - self.origin_gps.altitude  # ENU: positive when up
         return x, y, z
 
     def publish(self, event):
@@ -65,7 +65,7 @@ class VisionPosePublisher:
         msg.header.frame_id = 'map'
         msg.pose.position.x = local[0]
         msg.pose.position.y = local[1]
-        msg.pose.position.z = local[2]
+        msg.pose.position.z = local[2]  # ENU: positive up
         import tf.transformations as tft
         import math
         q = tft.quaternion_from_euler(0, 0, self.yaw)
