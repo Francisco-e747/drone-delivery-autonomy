@@ -30,23 +30,16 @@ class DroneController:
                                           Bool, queue_size=1)
 
         rospy.Subscriber('/mavros/state', State, self.state_cb, queue_size=1)
-        rospy.Subscriber('/mission/goal',
-                        __import__('sensor_msgs.msg', fromlist=['NavSatFix']).NavSatFix,
-                        self.mission_goal_cb, queue_size=1)
-        self._goal_gps_lat = None
-        self._goal_gps_lon = None
-        self._current_lat = None
-        self._current_lon = None
         rospy.Subscriber('/mavros/global_position/raw/gps_vel',
                         __import__('geometry_msgs.msg', fromlist=['TwistStamped']).TwistStamped,
                         self.vel_cb, queue_size=1)
+        self.drone_vx = 0.0
+        self.drone_vy = 0.0
         rospy.Subscriber('/mission/hover',
                         __import__('std_msgs.msg', fromlist=['Bool']).Bool,
                         self.hover_cb, queue_size=1)
         self._hovering = False
         self._hover_count = 0
-        self._current_yaw = 0.0
-        self._goal_yaw = None
         rospy.Subscriber('/airsim_node/drone_1/front_center_custom/DepthPerspective',
                         Image, self.depth_cb, queue_size=1)
         rospy.Subscriber('/mission/goal_local', Point, self.goal_local_cb, queue_size=1)
@@ -66,30 +59,15 @@ class DroneController:
     def state_cb(self, msg):
         self.mavros_state = msg
 
+    def vel_cb(self, msg):
+        self.drone_vx = msg.twist.linear.x
+        self.drone_vy = msg.twist.linear.y
+
     def hover_cb(self, msg):
         if msg.data:
             self._hovering = True
             self._hover_count = 0
             rospy.loginfo('Hovering to recalibrate...')
-
-    def mission_goal_cb(self, msg):
-        self._goal_gps_lat = msg.latitude
-        self._goal_gps_lon = msg.longitude
-
-    def vel_cb(self, msg):
-        import math
-        vx = msg.twist.linear.x
-        vy = msg.twist.linear.y
-        if math.sqrt(vx**2 + vy**2) > 0.5:
-            self._current_yaw = math.atan2(vx, vy)
-        # recompute goal_yaw from fixed goal GPS and current GPS
-        if self._goal_gps_lat and hasattr(self, "_current_lat"):
-            dlat = self._goal_gps_lat - self._current_lat
-            dlon = self._goal_gps_lon - self._current_lon
-            x_east = dlon * math.cos(math.radians(self._current_lat)) * 111320
-            y_north = dlat * 111320
-            self._goal_yaw = math.atan2(x_east, y_north)  # ENU bearing
-            rospy.loginfo_throttle(2, f'GoalYaw={math.degrees(self._goal_yaw):.0f} CurrYaw={math.degrees(self._current_yaw):.0f} dx={x_east:.0f} dy={y_north:.0f}')
 
     def goal_local_cb(self, msg):
         bearing = math.atan2(msg.x, msg.y)
@@ -98,7 +76,6 @@ class DroneController:
         else:
             self.goal_bearing = 0.95 * self.goal_bearing + 0.05 * bearing
         self._dist_to_goal = msg.z if msg.z > 0 else 500
-        self._goal_yaw = self.goal_bearing
 
     def land_cb(self, msg):
         if msg.data:
@@ -107,8 +84,6 @@ class DroneController:
 
     def fix_cb(self, msg):
         self.current_altitude = msg.altitude
-        self._current_lat = msg.latitude
-        self._current_lon = msg.longitude
 
     def depth_cb(self, msg):
         if self.phase not in ['TAKEOFF', 'NAVIGATE']:
@@ -162,13 +137,12 @@ class DroneController:
         except:
             return 0.0
 
-    def publish_attitude(self, thrust=0.528, roll=0.0, pitch=0.0, yaw=None):
+    def publish_attitude(self, thrust=0.528, roll=0.0, pitch=0.0):
         import tf.transformations as tft
         msg = AttitudeTarget()
         msg.header.stamp = rospy.Time.now()
         msg.type_mask = 0b00000111
-        yaw_val = yaw if yaw is not None else self._current_yaw
-        q = tft.quaternion_from_euler(roll, pitch, yaw_val)
+        q = tft.quaternion_from_euler(roll, pitch, 0.0)
         msg.orientation.x = q[0]
         msg.orientation.y = q[1]
         msg.orientation.z = q[2]
@@ -238,26 +212,24 @@ class DroneController:
                     self._hover_count += 1
                     alt_error = self.target_altitude - self.current_altitude
                     thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
-                    self.publish_attitude(thrust=thrust, roll=0.0)
-                    if self._hover_count > 100:  # hover 5 seconds then resume
+                    import math
+                    speed = math.sqrt(self.drone_vx**2 + self.drone_vy**2) if hasattr(self, 'drone_vx') else 0
+                    if speed > 1.0:
+                        # counter-roll to brake
+                        brake_bearing = math.atan2(self.drone_vx, self.drone_vy)
+                        counter_roll = max(-0.06, min(0.06, math.sin(brake_bearing) * 0.04))
+                        self.publish_attitude(thrust=thrust, roll=counter_roll)
+                    else:
+                        self.publish_attitude(thrust=thrust, roll=0.0)
+                    if self._hover_count > 60:
                         self._hovering = False
                         rospy.loginfo('Resuming navigation...')
                 else:
-                    import math
                     dist = getattr(self, '_dist_to_goal', 999)
                     alt_error = self.target_altitude - self.current_altitude
                     thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
-                    if dist < 20:
-                        self.publish_attitude(thrust=thrust)
-                    elif getattr(self, '_goal_yaw', None) is not None:
-                        hdg_err = self._goal_yaw - self._current_yaw
-                        while hdg_err > math.pi: hdg_err -= 2*math.pi
-                        while hdg_err < -math.pi: hdg_err += 2*math.pi
-                        if abs(hdg_err) > 0.15:
-                            self.publish_attitude(thrust=thrust, yaw=self._goal_yaw)
-                        else:
-                            self.publish_attitude(thrust=thrust, pitch=-0.03, yaw=self._goal_yaw)
-                        rospy.loginfo_throttle(3, f'Dist={dist:.0f}m HdgErr={math.degrees(hdg_err):.0f}')
+                    if dist < 50:
+                        self.publish_attitude(thrust=thrust, roll=0.0)
                     else:
                         roll = max(-0.08, min(0.08, -self.goal_bearing * 0.15))
                         self.publish_attitude(thrust=thrust, roll=roll)

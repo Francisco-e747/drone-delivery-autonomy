@@ -209,11 +209,12 @@ class MissionManager:
             if dist_m < self._min_dist:
                 self._min_dist = dist_m
                 self._overshot = False
-            elif dist_m > self._min_dist + 3 and not self._overshot:
+            elif dist_m > self._min_dist + 1 and not self._overshot:
                 self._overshot = True
                 rospy.logwarn(f'Overshoot at {dist_m:.0f}m (min was {self._min_dist:.0f}m) - hovering!')
                 self._stall_hover_pub.publish(__import__('std_msgs.msg', fromlist=['Bool']).Bool(data=True))
                 self._min_dist = dist_m  # reset
+                self._overshot = False
             # continuously update goal_local so drone steers correctly
             from geometry_msgs.msg import Point
             gp = Point()
