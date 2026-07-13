@@ -231,8 +231,15 @@ class DroneController:
                     if dist < 50:
                         self.publish_attitude(thrust=thrust, roll=0.0)
                     else:
-                        roll = max(-0.08, min(0.08, -self.goal_bearing * 0.15))
+                        import math
+                        curr_hdg = math.atan2(self.drone_vx, self.drone_vy)
+                        hdg_err = self.goal_bearing - curr_hdg
+                        while hdg_err > math.pi: hdg_err -= 2*math.pi
+                        while hdg_err < -math.pi: hdg_err += 2*math.pi
+                        # roll proportional to heading error (not goal_bearing)
+                        roll = max(-0.08, min(0.08, -hdg_err * 0.05))
                         self.publish_attitude(thrust=thrust, roll=roll)
+                        rospy.loginfo_throttle(2, f'Dist={dist:.0f} HdgErr={math.degrees(hdg_err):.0f} Roll={roll:.3f}')
             else:
                 alt_error = self.target_altitude - self.current_altitude
                 thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
