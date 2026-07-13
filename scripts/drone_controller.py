@@ -70,11 +70,16 @@ class DroneController:
             rospy.loginfo('Hovering to recalibrate...')
 
     def goal_local_cb(self, msg):
+        import math
         bearing = math.atan2(msg.x, msg.y)
         if self.goal_bearing is None:
             self.goal_bearing = bearing
         else:
-            self.goal_bearing = 0.95 * self.goal_bearing + 0.05 * bearing
+            # handle angle wrapping for smooth update
+            diff = bearing - self.goal_bearing
+            while diff > math.pi: diff -= 2*math.pi
+            while diff < -math.pi: diff += 2*math.pi
+            self.goal_bearing = self.goal_bearing + 0.05 * diff
         self._dist_to_goal = msg.z if msg.z > 0 else 500
 
     def land_cb(self, msg):
@@ -236,8 +241,11 @@ class DroneController:
                         hdg_err = self.goal_bearing - curr_hdg
                         while hdg_err > math.pi: hdg_err -= 2*math.pi
                         while hdg_err < -math.pi: hdg_err += 2*math.pi
-                        # roll proportional to heading error (not goal_bearing)
-                        roll = max(-0.08, min(0.08, -hdg_err * 0.05))
+                        # PD roll: proportional + derivative damping
+                        prev_hdg_err = getattr(self, "_prev_hdg_err", hdg_err)
+                        d_hdg_err = hdg_err - prev_hdg_err
+                        self._prev_hdg_err = hdg_err
+                        roll = max(-0.08, min(0.08, -hdg_err * 0.04 - d_hdg_err * 0.5))
                         self.publish_attitude(thrust=thrust, roll=roll)
                         rospy.loginfo_throttle(2, f'Dist={dist:.0f} HdgErr={math.degrees(hdg_err):.0f} Roll={roll:.3f}')
             else:
