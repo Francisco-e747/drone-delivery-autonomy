@@ -14,4 +14,6 @@
   <!-- Vision pose for EKF2 xy_valid -->
   <node pkg="drone_delivery" type="vision_pose_publisher.py"
         name="vision_pose_publisher" output="screen"/>
+  <!-- OctoMap for 3D obstacle mapping -->
+  <include file="$(find drone_delivery)/launch/octomap.launch"/>
 </launch>

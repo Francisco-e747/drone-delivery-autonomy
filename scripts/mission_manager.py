@@ -77,6 +77,7 @@ class MissionManager:
                 gp = Point()
                 gp.x = self.pending_goal[0]
                 gp.y = self.pending_goal[1]
+                gp.z = dist_m
                 self.goal_local_pub.publish(gp)
                 rospy.loginfo(f'Goal sent: x={gp.x:.1f}m y={gp.y:.1f}m')
 
@@ -220,6 +221,7 @@ class MissionManager:
             gp = Point()
             gp.x = dlon * math.cos(math.radians(self.current_gps.latitude)) * 111320
             gp.y = dlat * 111320
+            gp.z = dist_m
             self.goal_local_pub.publish(gp)
             if dist_m < 5.0:  # within 5m of goal
                 rospy.loginfo('MISSION COMPLETE - sending land command')

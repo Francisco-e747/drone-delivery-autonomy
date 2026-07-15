@@ -71,15 +71,17 @@ class DroneController:
 
     def goal_local_cb(self, msg):
         import math
+        self._dist_to_goal = msg.z if msg.z > 0 else 500
         bearing = math.atan2(msg.x, msg.y)
         if self.goal_bearing is None:
             self.goal_bearing = bearing
-        else:
-            # handle angle wrapping for smooth update
+        elif self._dist_to_goal > 25:
+            # smooth update only when far from goal
             diff = bearing - self.goal_bearing
             while diff > math.pi: diff -= 2*math.pi
             while diff < -math.pi: diff += 2*math.pi
-            self.goal_bearing = self.goal_bearing + 0.05 * diff
+            if abs(diff) < 1.5:  # ignore jumps > 90 degrees
+                self.goal_bearing = self.goal_bearing + 0.05 * diff
         self._dist_to_goal = msg.z if msg.z > 0 else 500
 
     def land_cb(self, msg):
@@ -142,12 +144,12 @@ class DroneController:
         except:
             return 0.0
 
-    def publish_attitude(self, thrust=0.528, roll=0.0, pitch=0.0):
+    def publish_attitude(self, thrust=0.528, roll=0.0, pitch=0.0, yaw=None):
         import tf.transformations as tft
         msg = AttitudeTarget()
         msg.header.stamp = rospy.Time.now()
         msg.type_mask = 0b00000111
-        q = tft.quaternion_from_euler(roll, pitch, 0.0)
+        q = tft.quaternion_from_euler(roll, pitch, yaw if yaw is not None else 0.0)
         msg.orientation.x = q[0]
         msg.orientation.y = q[1]
         msg.orientation.z = q[2]
@@ -241,13 +243,11 @@ class DroneController:
                         hdg_err = self.goal_bearing - curr_hdg
                         while hdg_err > math.pi: hdg_err -= 2*math.pi
                         while hdg_err < -math.pi: hdg_err += 2*math.pi
-                        # PD roll: proportional + derivative damping
-                        prev_hdg_err = getattr(self, "_prev_hdg_err", hdg_err)
-                        d_hdg_err = hdg_err - prev_hdg_err
-                        self._prev_hdg_err = hdg_err
-                        roll = max(-0.08, min(0.08, -hdg_err * 0.04 - d_hdg_err * 0.5))
-                        self.publish_attitude(thrust=thrust, roll=roll)
-                        rospy.loginfo_throttle(2, f'Dist={dist:.0f} HdgErr={math.degrees(hdg_err):.0f} Roll={roll:.3f}')
+                        if abs(hdg_err) > 0.15:
+                            self.publish_attitude(thrust=thrust, yaw=-self.goal_bearing)
+                        else:
+                            self.publish_attitude(thrust=thrust, pitch=-0.03, yaw=-self.goal_bearing)
+                        rospy.loginfo_throttle(2, f'Dist={dist:.0f} HdgErr={math.degrees(hdg_err):.0f}')
             else:
                 alt_error = self.target_altitude - self.current_altitude
                 thrust = max(0.50, min(0.56, 0.528 + alt_error * 0.001))
